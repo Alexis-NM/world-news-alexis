@@ -6,10 +6,10 @@ Application de presse en architecture microservices / microfrontends.
 
 ```
 world-news/
-  ms_reader/          Micro-app lecture (Frontend + Backend)
-  ms_writer/          Micro-app redaction (Frontend + Backend)
-  Db/                 Scripts SQL (init, schema, seed)
-  Docs/               Diagrammes MCD / MLD
+  reader/             Micro-app lecture (frontend + backend)
+  writer/             Micro-app redaction (frontend + backend)
+  db/                 Scripts SQL (init, schema, seed)
+  docs/               Diagrammes MCD / MLD
 ```
 
 ## Stack technique
