@@ -1,0 +1,13 @@
+# Dépendances locales — on les réinstalle proprement dans le conteneur via npm ci
+node_modules
+
+# Fichiers compilés — on recompile dans le conteneur via npm run build
+dist
+
+# Variables d'environnement — contiennent des secrets (mots de passe, clés API)
+# Elles seront injectées au runtime via docker-compose.yml, pas embarquées dans l'image
+.env
+.env.*
+
+# Exception : le fichier exemple (sans valeurs sensibles) peut être inclus
+!.env.example

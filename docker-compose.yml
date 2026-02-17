@@ -1,0 +1,199 @@
+# =============================================================================
+# Docker Compose — Orchestration de tous les services World News
+# =============================================================================
+#
+# QUEL EST LE RÔLE DE DOCKER COMPOSE ?
+#
+# Sans Docker Compose, il faudrait lancer chaque conteneur à la main avec
+# des commandes "docker run" séparées, en configurant manuellement :
+#   - les ports de chaque conteneur
+#   - les variables d'environnement de chacun
+#   - le réseau pour qu'ils se parlent entre eux
+#   - les volumes pour persister les données
+#   - l'ordre de démarrage (la base avant les API, etc.)
+#
+# Docker Compose fait tout ça en une seule commande à partir de CE fichier.
+# Sous le capot, quand on lance "docker compose up", il :
+#   1. Crée un réseau virtuel privé pour que les conteneurs communiquent
+#      entre eux par leur nom de service (ex: "db", "writer-api")
+#   2. Construit les images depuis les Dockerfiles (si "build:" est spécifié)
+#      ou télécharge les images existantes (si "image:" est spécifié)
+#   3. Crée et démarre les conteneurs dans le bon ordre (grâce à "depends_on")
+#   4. Monte les volumes pour la persistance des données
+#   5. Injecte les variables d'environnement dans chaque conteneur
+#
+# En résumé : un Dockerfile décrit COMMENT construire UN conteneur,
+# docker-compose.yml décrit COMMENT orchestrer PLUSIEURS conteneurs ensemble.
+#
+# Commandes utiles :
+#   docker compose up              → construit et lance tous les services
+#   docker compose up -d           → idem, en arrière-plan (detached)
+#   docker compose down            → arrête et supprime les conteneurs
+#   docker compose down -v         → idem + supprime les volumes (données)
+#   docker compose logs -f         → affiche les logs en temps réel
+#   docker compose ps              → liste les conteneurs en cours
+#   docker compose build           → reconstruit les images sans lancer
+#
+# =============================================================================
+# CONCEPTS CLÉS UTILISÉS DANS CE FICHIER
+# =============================================================================
+#
+# image vs build :
+#   "image:" télécharge une image existante (ex: postgres officiel).
+#   "build:" construit une image depuis un Dockerfile local.
+#
+# ports (HOST:CONTENEUR) :
+#   Le conteneur a son propre réseau isolé. "ports" crée un tunnel entre
+#   un port de ta machine (hôte) et un port du conteneur.
+#   Ex: "5173:80" → localhost:5173 sur ton navigateur arrive au port 80 du conteneur.
+#
+# environment vs args :
+#   "environment" injecte des variables au RUNTIME (quand le conteneur tourne).
+#   "args" injecte des variables au BUILD (quand l'image est construite).
+#   Les frontends Vite ont besoin de "args" car VITE_* est écrit en dur dans le
+#   JS à la compilation. Les backends utilisent "environment" car ils lisent
+#   process.env au démarrage.
+#
+# depends_on :
+#   Définit l'ordre de démarrage. Avec "condition: service_healthy",
+#   le service attend que le healthcheck de sa dépendance soit au vert.
+#   Sans ça, l'API pourrait démarrer avant que PostgreSQL soit prêt → crash.
+#
+# restart: unless-stopped :
+#   Redémarre le conteneur automatiquement en cas de crash,
+#   sauf si on l'a arrêté manuellement avec docker compose down.
+#
+# ${VARIABLE} :
+#   Lues depuis le fichier .env à la racine du projet. Cela évite d'écrire
+#   les mots de passe et clés API en dur dans ce fichier versionné.
+#
+
+# =============================================================================
+# SERVICES — Chaque bloc décrit un conteneur indépendant
+# =============================================================================
+#   db              → PostgreSQL (base de données partagée)
+#   writer-api      → Backend Writer (Express + TypeORM)
+#   reader-api      → Backend Reader (Express + Prisma)
+#   writer-front    → Frontend Writer (React servi par nginx)
+#   reader-front    → Frontend Reader (React servi par nginx)
+services:
+
+  # ===========================================================================
+  # BASE DE DONNÉES — PostgreSQL
+  # ===========================================================================
+  # Pas besoin de Dockerfile : l'image officielle est prête à l'emploi.
+  # Elle fournit un mécanisme d'initialisation automatique :
+  # tout fichier .sql placé dans /docker-entrypoint-initdb.d/ est exécuté
+  # au tout premier démarrage (base vierge), dans l'ordre alphabétique.
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      # Variables lues par l'image officielle PostgreSQL.
+      # POSTGRES_DB crée automatiquement la base au démarrage.
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      # Accessible sur localhost:5432 (utile pour se connecter via pgAdmin/DBeaver)
+      - "5432:5432"
+    volumes:
+      # Scripts SQL d'initialisation, exécutés une seule fois dans cet ordre :
+      #   01-schema.sql     → schémas, tables, vues matérialisées, triggers
+      #   02-categories.sql → catégories
+      #   03-seed.sql       → articles de test
+      # ":ro" = read-only, empêche le conteneur de modifier ces fichiers.
+      - ./db:/docker-entrypoint-initdb.d:ro
+      # Volume nommé pour persister les données entre les redémarrages.
+      # Sans ça, un "docker compose down" effacerait toute la base.
+      - pgdata:/var/lib/postgresql/data
+    # Vérifie toutes les 5s que PostgreSQL accepte les connexions.
+    # Les backends utilisent ce healthcheck via depends_on → condition.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================================================
+  # BACKEND WRITER — Express + TypeORM
+  # ===========================================================================
+  writer-api:
+    build:
+      context: ./writer/backend
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      FRONTEND_URL: http://localhost:5173
+      # DB_HOST vaut "db" et non "localhost" : dans le réseau Docker,
+      # les conteneurs se trouvent entre eux par leur nom de service.
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB}
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ===========================================================================
+  # BACKEND READER — Express + Prisma
+  # ===========================================================================
+  reader-api:
+    build:
+      context: ./reader/backend
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      FRONTEND_URL: http://localhost:5174
+      # Prisma attend une URL de connexion complète (format standard PostgreSQL).
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    ports:
+      - "3001:3001"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ===========================================================================
+  # FRONTEND WRITER — React (servi par nginx)
+  # ===========================================================================
+  writer-front:
+    build:
+      context: ./writer/frontend
+      args:
+        VITE_API_URL: http://localhost:3000/api
+    restart: unless-stopped
+    ports:
+      # nginx écoute sur 80 dans le conteneur → mappé sur 5173 côté hôte
+      - "5173:80"
+    depends_on:
+      - writer-api
+
+  # ===========================================================================
+  # FRONTEND READER — React (servi par nginx)
+  # ===========================================================================
+  reader-front:
+    build:
+      context: ./reader/frontend
+      args:
+        VITE_API_URL: http://localhost:3001
+    restart: unless-stopped
+    ports:
+      # Port 5174 pour ne pas entrer en conflit avec le Writer (5173)
+      - "5174:80"
+    depends_on:
+      - reader-api
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+# Déclare les volumes nommés utilisés par les services.
+# Les données de PostgreSQL sont stockées sur le disque de la machine hôte,
+# en dehors du cycle de vie des conteneurs.
+# Pour réinitialiser la base : docker compose down -v
+volumes:
+  pgdata:
