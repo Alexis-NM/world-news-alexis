@@ -1,0 +1,9 @@
+# Commit-msg : vérifie le format du message de commit
+# Utilise commitlint avec la convention "Conventional Commits" :
+#   feat: ...     → nouvelle fonctionnalité
+#   fix: ...      → correction de bug
+#   docs: ...     → documentation
+#   refactor: ... → refactoring
+#   test: ...     → ajout/modification de tests
+#   chore: ...    → maintenance (dépendances, CI, etc.)
+npx --no -- commitlint --edit "$1"

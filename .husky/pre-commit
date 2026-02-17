@@ -1,0 +1,17 @@
+# Pre-commit : vérifie la qualité du code avant chaque commit
+# 1. lint-staged lance Biome (lint + format) et secretlint sur les fichiers stagés
+# 2. tsc --noEmit vérifie les types TypeScript sans compiler
+npx lint-staged
+
+# Type-check sur chaque sous-projet
+echo "Type-checking writer/backend..."
+npx tsc --noEmit --project writer/backend/tsconfig.json
+
+echo "Type-checking reader/backend..."
+npx tsc --noEmit --project reader/backend/tsconfig.json
+
+echo "Type-checking writer/frontend..."
+npx tsc --noEmit --project writer/frontend/tsconfig.json
+
+echo "Type-checking reader/frontend..."
+npx tsc --noEmit --project reader/frontend/tsconfig.json
