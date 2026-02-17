@@ -1,38 +1,24 @@
 # =============================================================================
-# Docker Compose — Orchestration de tous les services World News
+# Docker Compose — Développement avec Hot Reload
 # =============================================================================
 #
-# QUEL EST LE RÔLE DE DOCKER COMPOSE ?
-#
-# Sans Docker Compose, il faudrait lancer chaque conteneur à la main avec
-# des commandes "docker run" séparées, en configurant manuellement :
-#   - les ports de chaque conteneur
-#   - les variables d'environnement de chacun
-#   - le réseau pour qu'ils se parlent entre eux
-#   - les volumes pour persister les données
-#   - l'ordre de démarrage (la base avant les API, etc.)
-#
-# Docker Compose fait tout ça en une seule commande à partir de CE fichier.
-# Sous le capot, quand on lance "docker compose up", il :
-#   1. Crée un réseau virtuel privé pour que les conteneurs communiquent
-#      entre eux par leur nom de service (ex: "db", "writer-api")
-#   2. Construit les images depuis les Dockerfiles (si "build:" est spécifié)
-#      ou télécharge les images existantes (si "image:" est spécifié)
-#   3. Crée et démarre les conteneurs dans le bon ordre (grâce à "depends_on")
-#   4. Monte les volumes pour la persistance des données
-#   5. Injecte les variables d'environnement dans chaque conteneur
-#
-# En résumé : un Dockerfile décrit COMMENT construire UN conteneur,
-# docker-compose.yml décrit COMMENT orchestrer PLUSIEURS conteneurs ensemble.
+# Ce fichier orchestre tous les services en mode DÉVELOPPEMENT.
+# Contrairement à une config de production :
+#   - Le code source est monté en volume (bind mount) → les modifications
+#     sur ta machine sont instantanément visibles dans les conteneurs
+#   - Les backends utilisent tsx watch → redémarrage auto à chaque changement
+#   - Les frontends utilisent vite dev → HMR (Hot Module Replacement)
+#   - Toutes les dépendances (y compris devDeps) sont installées
 #
 # Commandes utiles :
 #   docker compose up              → construit et lance tous les services
 #   docker compose up -d           → idem, en arrière-plan (detached)
+#   docker compose up --build      → force la reconstruction des images
 #   docker compose down            → arrête et supprime les conteneurs
-#   docker compose down -v         → idem + supprime les volumes (données)
+#   docker compose down -v         → idem + supprime les volumes (données BDD)
 #   docker compose logs -f         → affiche les logs en temps réel
+#   docker compose logs -f <nom>   → logs d'un seul service (ex: writer-api)
 #   docker compose ps              → liste les conteneurs en cours
-#   docker compose build           → reconstruit les images sans lancer
 #
 # =============================================================================
 # CONCEPTS CLÉS UTILISÉS DANS CE FICHIER
@@ -45,37 +31,46 @@
 # ports (HOST:CONTENEUR) :
 #   Le conteneur a son propre réseau isolé. "ports" crée un tunnel entre
 #   un port de ta machine (hôte) et un port du conteneur.
-#   Ex: "5173:80" → localhost:5173 sur ton navigateur arrive au port 80 du conteneur.
+#   Ex: "5173:5173" → localhost:5173 sur ton navigateur arrive au port 5173
+#   du conteneur où Vite dev server écoute.
 #
-# environment vs args :
-#   "environment" injecte des variables au RUNTIME (quand le conteneur tourne).
-#   "args" injecte des variables au BUILD (quand l'image est construite).
-#   Les frontends Vite ont besoin de "args" car VITE_* est écrit en dur dans le
-#   JS à la compilation. Les backends utilisent "environment" car ils lisent
-#   process.env au démarrage.
+# volumes (bind mount) :
+#   Un bind mount partage un dossier de ta machine avec le conteneur.
+#   Syntaxe : ./chemin/local:/chemin/conteneur
+#   → Tout changement d'un côté est visible de l'autre en temps réel.
+#   C'est ce qui permet le hot reload sans reconstruire l'image.
 #
-# depends_on :
+#   PIÈGE DES NODE_MODULES :
+#   Quand on monte ./writer/backend:/app, le dossier node_modules de
+#   ta machine écrase celui installé dans l'image Docker (qui peut être
+#   différent, ex: binaires compilés pour Linux vs macOS).
+#   Pour éviter ça, on utilise un "volume anonyme" sur node_modules :
+#     - /app/node_modules
+#   Ce volume dit à Docker : "pour CE dossier, garde la version du conteneur
+#   et ignore celle de l'hôte". Ainsi npm ci dans le Dockerfile est préservé.
+#
+# depends_on + healthcheck :
 #   Définit l'ordre de démarrage. Avec "condition: service_healthy",
 #   le service attend que le healthcheck de sa dépendance soit au vert.
 #   Sans ça, l'API pourrait démarrer avant que PostgreSQL soit prêt → crash.
 #
+# environment :
+#   Injecte des variables d'environnement au runtime dans le conteneur.
+#   ${VARIABLE} est lue depuis le fichier .env à la racine du projet.
+#
 # restart: unless-stopped :
 #   Redémarre le conteneur automatiquement en cas de crash,
 #   sauf si on l'a arrêté manuellement avec docker compose down.
-#
-# ${VARIABLE} :
-#   Lues depuis le fichier .env à la racine du projet. Cela évite d'écrire
-#   les mots de passe et clés API en dur dans ce fichier versionné.
 #
 
 # =============================================================================
 # SERVICES — Chaque bloc décrit un conteneur indépendant
 # =============================================================================
 #   db              → PostgreSQL (base de données partagée)
-#   writer-api      → Backend Writer (Express + TypeORM)
-#   reader-api      → Backend Reader (Express + Prisma)
-#   writer-front    → Frontend Writer (React servi par nginx)
-#   reader-front    → Frontend Reader (React servi par nginx)
+#   writer-api      → Backend Writer (Express + TypeORM, tsx watch)
+#   reader-api      → Backend Reader (Express + Prisma, tsx watch)
+#   writer-front    → Frontend Writer (React, Vite dev server + HMR)
+#   reader-front    → Frontend Reader (React, Vite dev server + HMR)
 services:
 
   # ===========================================================================
@@ -116,7 +111,7 @@ services:
       retries: 5
 
   # ===========================================================================
-  # BACKEND WRITER — Express + TypeORM
+  # BACKEND WRITER — Express + TypeORM (tsx watch)
   # ===========================================================================
   writer-api:
     build:
@@ -124,7 +119,7 @@ services:
     restart: unless-stopped
     environment:
       PORT: 3000
-      NODE_ENV: production
+      NODE_ENV: development
       FRONTEND_URL: http://localhost:5173
       # DB_HOST vaut "db" et non "localhost" : dans le réseau Docker,
       # les conteneurs se trouvent entre eux par leur nom de service.
@@ -136,12 +131,24 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
     ports:
       - "3000:3000"
+    volumes:
+      # Bind mount : le code source de ta machine est partagé avec le conteneur.
+      # Quand tu modifies un fichier dans writer/backend/src/, tsx watch détecte
+      # le changement et redémarre automatiquement le serveur dans le conteneur.
+      - ./writer/backend/src:/app/src
+      # On monte aussi le tsconfig.json pour que tsx respecte la config
+      # TypeScript (notamment experimentalDecorators requis par TypeORM).
+      - ./writer/backend/tsconfig.json:/app/tsconfig.json
+      # Volume anonyme : protège le node_modules du conteneur.
+      # Sans ça, le mount du dossier parent écraserait les node_modules
+      # installés par npm ci dans le Dockerfile (qui sont compilés pour Linux).
+      - /app/node_modules
     depends_on:
       db:
         condition: service_healthy
 
   # ===========================================================================
-  # BACKEND READER — Express + Prisma
+  # BACKEND READER — Express + Prisma (tsx watch)
   # ===========================================================================
   reader-api:
     build:
@@ -154,37 +161,71 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     ports:
       - "3001:3001"
+    volumes:
+      # Bind mount du code source pour le hot reload via tsx watch.
+      - ./reader/backend/src:/app/src
+      - ./reader/backend/tsconfig.json:/app/tsconfig.json
+      # Volume anonyme pour protéger les node_modules du conteneur.
+      - /app/node_modules
     depends_on:
       db:
         condition: service_healthy
 
   # ===========================================================================
-  # FRONTEND WRITER — React (servi par nginx)
+  # FRONTEND WRITER — React (Vite dev server + HMR)
   # ===========================================================================
   writer-front:
     build:
       context: ./writer/frontend
-      args:
-        VITE_API_URL: http://localhost:3000/api
     restart: unless-stopped
+    environment:
+      # En dev, VITE_* peut être lu via process.env car le serveur Vite
+      # les injecte dynamiquement (contrairement au build de prod où les
+      # valeurs sont écrites en dur dans le JS compilé via "args:").
+      VITE_API_URL: http://localhost:3000/api
     ports:
-      # nginx écoute sur 80 dans le conteneur → mappé sur 5173 côté hôte
-      - "5173:80"
+      # Vite dev server écoute sur 5173 dans le conteneur.
+      - "5173:5173"
+    volumes:
+      # Bind mount du code source pour le HMR.
+      # Quand tu modifies un composant React, Vite envoie la mise à jour
+      # au navigateur via WebSocket → le composant est remplacé à chaud
+      # sans recharger la page entière.
+      - ./writer/frontend/src:/app/src
+      - ./writer/frontend/index.html:/app/index.html
+      # On monte aussi les fichiers de config pour que les changements
+      # de config Vite/TypeScript soient pris en compte sans rebuild.
+      - ./writer/frontend/vite.config.ts:/app/vite.config.ts
+      - ./writer/frontend/tsconfig.json:/app/tsconfig.json
+      - ./writer/frontend/tsconfig.app.json:/app/tsconfig.app.json
+      - ./writer/frontend/tsconfig.node.json:/app/tsconfig.node.json
+      # Volume anonyme pour protéger les node_modules du conteneur.
+      - /app/node_modules
     depends_on:
       - writer-api
 
   # ===========================================================================
-  # FRONTEND READER — React (servi par nginx)
+  # FRONTEND READER — React (Vite dev server + HMR)
   # ===========================================================================
   reader-front:
     build:
       context: ./reader/frontend
-      args:
-        VITE_API_URL: http://localhost:3001
     restart: unless-stopped
+    environment:
+      VITE_API_URL: http://localhost:3001
     ports:
-      # Port 5174 pour ne pas entrer en conflit avec le Writer (5173)
-      - "5174:80"
+      # Port 5174 pour ne pas entrer en conflit avec le Writer (5173).
+      - "5174:5174"
+    volumes:
+      # Bind mount du code source pour le HMR.
+      - ./reader/frontend/src:/app/src
+      - ./reader/frontend/index.html:/app/index.html
+      - ./reader/frontend/vite.config.ts:/app/vite.config.ts
+      - ./reader/frontend/tsconfig.json:/app/tsconfig.json
+      - ./reader/frontend/tsconfig.app.json:/app/tsconfig.app.json
+      - ./reader/frontend/tsconfig.node.json:/app/tsconfig.node.json
+      # Volume anonyme pour protéger les node_modules du conteneur.
+      - /app/node_modules
     depends_on:
       - reader-api
 

@@ -1,49 +1,51 @@
 # =============================================
-# Étape 1 : Build (conteneur temporaire)
+# Dockerfile — Writer Backend (développement)
 # =============================================
-# On utilise une image légère (Alpine) avec Node 22.
-# "AS build" donne un nom à cette étape pour pouvoir y faire référence plus tard.
-FROM node:22-alpine AS build
-
-WORKDIR /app
-
-# On copie les fichiers de dépendances en premier, séparément du code source.
-# Pourquoi ? Docker met en cache chaque étape. Si package.json n'a pas changé,
-# Docker réutilise le cache et skip le npm ci → build beaucoup plus rapide.
-COPY package*.json ./
-# npm ci installe les versions exactes du package-lock.json (contrairement à
-# npm install qui peut résoudre des versions différentes). Ça garantit un
-# build reproductible à chaque fois.
-RUN npm ci
-
-# On copie ensuite le code source et on compile TypeScript → JavaScript.
-# Le résultat de la compilation est placé dans le dossier dist/.
-COPY tsconfig.json ./
-COPY src ./src
-RUN npm run build
-
+#
+# DIFFÉRENCE AVEC UN DOCKERFILE DE PRODUCTION
+#
+# En production, on utilise un "multi-stage build" :
+#   1. Une étape compile TypeScript → JavaScript
+#   2. Une étape finale ne contient que le JS compilé + les deps de prod
+#   → Image légère, sécurisée, optimisée.
+#
+# En développement, on veut du HOT RELOAD : que le serveur redémarre
+# automatiquement à chaque modification de fichier, sans reconstruire
+# l'image Docker. Pour ça, on utilise une approche différente :
+#   - Une seule étape (pas de compilation, tsx exécute le TS directement)
+#   - Le code source n'est PAS copié dans l'image : il est monté en
+#     volume par docker-compose.yml (→ les fichiers de ta machine sont
+#     partagés en temps réel avec le conteneur)
+#   - tsx watch surveille les changements et redémarre le serveur
+#
 # =============================================
-# Étape 2 : Production (image finale)
-# =============================================
-# On repart d'une image vierge. Tout ce qui existait dans l'étape 1
-# (code source TS, devDependencies, fichiers intermédiaires) est jeté.
-# Seule cette étape constitue l'image finale.
+
 FROM node:22-alpine
 
 WORKDIR /app
 
-# On réinstalle uniquement les dépendances de production (--omit=dev),
-# ce qui exclut TypeScript et les autres outils de build devenus inutiles.
+# On copie les fichiers de dépendances en premier pour profiter du cache Docker.
+# Tant que package.json ne change pas, Docker réutilise le cache du npm ci
+# → pas besoin de réinstaller les dépendances à chaque rebuild.
 COPY package*.json ./
-RUN npm ci --omit=dev
 
-# On récupère le dossier dist/ depuis l'étape 1 (nommée "build").
-# C'est le seul lien entre les deux étapes : on ne prend que le JavaScript compilé.
-COPY --from=build /app/dist ./dist
+# npm ci installe les versions exactes du package-lock.json.
+# En dev, on installe TOUTES les dépendances (y compris devDependencies)
+# car on a besoin de tsx, typescript, et les autres outils de développement.
+# En production, on ferait "npm ci --omit=dev" pour exclure les devDeps.
+RUN npm ci
 
-# Documente le port exposé par le conteneur (informatif, ne fait pas de mapping).
-# Le mapping réel se fera dans docker-compose.yml ou via docker run -p.
+# IMPORTANT : on ne copie PAS le code source ici.
+# Le dossier src/ sera monté en volume par docker-compose.yml.
+# C'est ce qui permet le hot reload : quand tu modifies un fichier sur
+# ta machine, le changement est instantanément visible dans le conteneur,
+# et tsx watch redémarre le serveur automatiquement.
+
+# Documente le port exposé (informatif uniquement).
+# Le mapping réel est fait dans docker-compose.yml via "ports:".
 EXPOSE 3000
 
-# Commande exécutée au démarrage du conteneur.
-CMD ["node", "dist/index.js"]
+# "npm run dev" exécute "tsx watch src/index.ts" (défini dans package.json).
+# tsx = exécuteur TypeScript qui n'a pas besoin de compiler en JS d'abord.
+# watch = surveille les fichiers et redémarre à chaque modification.
+CMD ["npm", "run", "dev"]
