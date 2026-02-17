@@ -1,0 +1,17 @@
+# Pre-push : lance les tests avant chaque push
+# Si les tests échouent, le push est bloqué.
+echo "Running tests for writer/backend..."
+cd writer/backend && npm test
+cd ../..
+
+echo "Running tests for reader/backend..."
+cd reader/backend && npm test
+cd ../..
+
+echo "Running tests for writer/frontend..."
+cd writer/frontend && npm test
+cd ../..
+
+echo "Running tests for reader/frontend..."
+cd reader/frontend && npm test
+cd ../..
