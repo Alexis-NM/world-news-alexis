@@ -1,0 +1,73 @@
+# =============================================================================
+# Docker Compose — Base de données de TEST
+# =============================================================================
+#
+# POURQUOI UN FICHIER SÉPARÉ ?
+#
+# On ne veut pas mélanger les données de développement et les données de test.
+# Ce fichier crée un conteneur PostgreSQL dédié aux tests, complètement isolé
+# de la base de dev (docker-compose.yml). Ainsi :
+#   - Les tests ne polluent jamais les données de dev
+#   - On peut lancer les tests en parallèle du développement
+#   - Le conteneur de test est jetable et recréé à chaque session de tests
+#
+# COMMENT L'UTILISER ?
+#
+#   npm run test:db:up     → démarre le conteneur de test
+#   npm test               → lance les tests (démarre/arrête Docker automatiquement)
+#   npm run test:db:down   → arrête et supprime le conteneur
+#
+# =============================================================================
+#
+# CONCEPT CLÉ : tmpfs (Temporary File System)
+#
+# Par défaut, PostgreSQL stocke ses données sur le disque dur du conteneur.
+# Avec tmpfs, on stocke les données en RAM (mémoire vive) à la place.
+#
+# Avantages pour les tests :
+#   - Rapidité : la RAM est ~100x plus rapide que le disque
+#   - Jetable  : les données disparaissent quand le conteneur s'arrête
+#   - Isolation : aucun risque de données résiduelles entre deux sessions
+#
+# Inconvénient : les données ne survivent pas à un redémarrage du conteneur.
+# C'est exactement ce qu'on veut pour les tests : repartir de zéro à chaque fois.
+#
+# =============================================================================
+
+services:
+
+  # ===========================================================================
+  # BASE DE DONNÉES DE TEST — PostgreSQL en RAM
+  # ===========================================================================
+  db-test:
+    image: postgres:17-alpine
+    environment:
+      # On utilise un nom de base différent de la prod pour éviter toute confusion.
+      POSTGRES_DB: worldnews_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      # Port 5433 sur la machine hôte (au lieu de 5432) pour ne pas
+      # entrer en conflit avec la base de dev qui tourne sur 5432.
+      - "5433:5432"
+    # ─── tmpfs : stockage en RAM ───────────────────────────────────────
+    # Tout ce que PostgreSQL écrit dans /var/lib/postgresql/data sera
+    # stocké en RAM, pas sur le disque. Résultat : les tests sont rapides
+    # et les données disparaissent à l'arrêt du conteneur.
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      # On réutilise les mêmes scripts SQL d'initialisation que la prod.
+      # Ils créent les schémas (writer/reader), les tables, les vues
+      # matérialisées, les triggers et insèrent les données de seed.
+      # ":ro" = read-only, le conteneur ne peut pas modifier ces fichiers.
+      - ./db:/docker-entrypoint-initdb.d:ro
+    # ─── Healthcheck : vérifier que la DB est prête ───────────────────
+    # Les tests ne doivent pas démarrer avant que PostgreSQL accepte
+    # les connexions. Ce healthcheck vérifie toutes les 2 secondes.
+    # L'option --wait de "docker compose up" attend ce healthcheck.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d worldnews_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
