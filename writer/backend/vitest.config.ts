@@ -36,6 +36,15 @@ export default defineConfig({
 		// seront exécutés par Vitest.
 		include: ["src/__tests__/**/*.test.ts"],
 
+		// ─── fileParallelism ────────────────────────────────────────────────
+		// Exécute les fichiers de test en séquence, pas en parallèle.
+		// Nécessaire car les tests articles et Gemini partagent le même
+		// objet Express `app` et la même connexion TypeORM. En parallèle,
+		// le vi.mock de Gemini peut interférer avec l'import de app.ts
+		// dans les tests articles.
+		// Les tests DANS un même fichier restent parallélisables.
+		fileParallelism: false,
+
 		// ─── setupFiles ─────────────────────────────────────────────────────
 		// Fichiers exécutés AVANT chaque fichier de test.
 		// C'est ici qu'on initialise la connexion à la base de données de test

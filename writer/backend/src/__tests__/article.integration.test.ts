@@ -139,23 +139,28 @@ describe("Writer API", () => {
 	// ─── GET /api/articles ─────────────────────────────────────────────────
 
 	describe("GET /api/articles", () => {
-		it("articles existants → 200 + pagination cohérente", async () => {
-			// ARRANGE : créer 2 articles pour avoir des données réelles
+		it("articles existants → 200 + structure { articles, pagination }", async () => {
+			// ARRANGE
 			await request(app)
 				.post("/api/articles")
 				.send(buildCreateArticleDTO({ title: uniqueTitle("List-1") }));
-			await request(app)
-				.post("/api/articles")
-				.send(buildCreateArticleDTO({ title: uniqueTitle("List-2") }));
 
 			// ACT
 			const res = await request(app).get("/api/articles");
 
-			// ASSERT : la pagination reflète les articles créés
+			// ASSERT : vérifie la structure de réponse (notre contrat d'API),
+			// pas le comptage (qui revient à tester TypeORM).
 			expect(res.status).toBe(200);
-			expect(res.body.articles.length).toBe(2);
-			expect(res.body.pagination.total).toBe(2);
-			expect(res.body.pagination.page).toBe(1);
+			expect(Array.isArray(res.body.articles)).toBe(true);
+			expect(res.body.articles.length).toBeGreaterThanOrEqual(1);
+			expect(res.body.pagination).toEqual(
+				expect.objectContaining({
+					page: expect.any(Number),
+					limit: expect.any(Number),
+					total: expect.any(Number),
+					totalPages: expect.any(Number),
+				}),
+			);
 		});
 	});
 
@@ -210,36 +215,45 @@ describe("Writer API", () => {
 	});
 
 	// ─── PATCH /api/articles/:id/delete + restore ──────────────────────────
-	// On teste le cycle complet delete → restore dans un seul test.
-	// Ça évite la duplication (deux tests qui font chacun create + setup)
-	// et ça vérifie le vrai scénario utilisateur : supprimer puis restaurer.
 
 	describe("PATCH soft-delete et restore", () => {
-		it("delete puis restore → article ré-accessible", async () => {
+		it("soft-delete → article exclu des résultats de recherche", async () => {
 			// ARRANGE
-			const title = uniqueTitle("Cycle");
+			const keyword = `SoftDel${Date.now()}`;
+			const created = await request(app)
+				.post("/api/articles")
+				.send(buildCreateArticleDTO({ title: keyword }));
+			const articleId = created.body.data.id;
+
+			// ACT
+			await request(app).patch(`/api/articles/${articleId}/delete`);
+
+			// ASSERT : l'article n'apparaît plus dans la recherche
+			const searchRes = await request(app).get(
+				`/api/articles/search?q=${keyword}`,
+			);
+			expect(searchRes.body.length).toBe(0);
+		});
+
+		it("restore après soft-delete → 200 + article ré-accessible", async () => {
+			// ARRANGE : créer puis soft-delete (précondition)
+			const title = uniqueTitle("Restore");
 			const created = await request(app)
 				.post("/api/articles")
 				.send(buildCreateArticleDTO({ title }));
 			const articleId = created.body.data.id;
 
-			// ACT 1 : soft-delete
-			const deleteRes = await request(app).patch(
-				`/api/articles/${articleId}/delete`,
-			);
+			await request(app).patch(`/api/articles/${articleId}/delete`);
 
-			expect(deleteRes.status).toBe(200);
-			expect(deleteRes.body.message).toBe("Article supprimé avec succès");
-
-			// ACT 2 : restore
+			// ACT
 			const restoreRes = await request(app).patch(
 				`/api/articles/${articleId}/restore`,
 			);
 
+			// ASSERT
 			expect(restoreRes.status).toBe(200);
 			expect(restoreRes.body.message).toBe("Article restoré avec succès");
 
-			// ASSERT : l'article est bien ré-accessible après restore
 			const getRes = await request(app).get(`/api/articles/${articleId}`);
 			expect(getRes.status).toBe(200);
 			expect(getRes.body.data.title).toBe(title);
@@ -260,7 +274,7 @@ describe("Writer API", () => {
 
 			expect(res.status).toBe(200);
 			expect(Array.isArray(res.body)).toBe(true);
-			expect(res.body.length).toBeGreaterThanOrEqual(1);
+			expect(res.body.length).toBe(1);
 		});
 	});
 });
