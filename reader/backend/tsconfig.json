@@ -1,23 +1,23 @@
 {
-  "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist",
+	"compilerOptions": {
+		"rootDir": "src",
+		"outDir": "dist",
 
-    "module": "nodenext",
-    "target": "esnext",
-    "types": ["node"],
+		"module": "nodenext",
+		"target": "esnext",
+		"types": ["node", "vitest/globals"],
 
-    "sourceMap": true,
-    "declaration": true,
-    "declarationMap": true,
+		"sourceMap": true,
+		"declaration": true,
+		"declarationMap": true,
 
-    "strict": true,
-    "verbatimModuleSyntax": true,
-    "isolatedModules": true,
-    "noUncheckedSideEffectImports": true,
-    "moduleDetection": "force",
-    "skipLibCheck": true
-  },
-  "include": ["src"],
-  "exclude": ["node_modules", "dist"]
+		"strict": true,
+		"verbatimModuleSyntax": true,
+		"isolatedModules": true,
+		"noUncheckedSideEffectImports": true,
+		"moduleDetection": "force",
+		"skipLibCheck": true
+	},
+	"include": ["src"],
+	"exclude": ["node_modules", "dist"]
 }
