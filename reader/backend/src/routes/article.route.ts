@@ -1,7 +1,7 @@
 import { Router } from "express";
 import {
-  getLastTenArticlesByMostRecent,
-  getArticleById,
+	getArticleById,
+	getLastTenArticlesByMostRecent,
 } from "../controllers/article.controller.js";
 import validate from "../middlewares/validate.middleware.js";
 import { getArticleByIdSchema } from "../schemas/article.schema.js";

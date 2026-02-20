@@ -19,6 +19,8 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    env:
+      GEMINI_API_KEY: test-key-ci
 
     steps:
       # ── 1. Récupérer le code ───────────────────────────────────────────
